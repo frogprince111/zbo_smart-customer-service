@@ -1,0 +1,12 @@
+id: query_order
+name: 查询订单
+description: 查询订单物流状态
+trigger_commands:
+  - query_order
+steps:
+  - type: slot
+    slot: order_id
+    prompt: 请提供订单号
+  - type: action
+    name: query_order
+
