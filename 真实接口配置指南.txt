@@ -1,0 +1,768 @@
+真实接口配置指南
+================
+
+这份文档是给第一次接触后端项目、API、配置文件的小白看的。
+
+你可以先记住一句话：
+
+当前项目已经可以在 Mock 模式下完整跑通，但 Mock 是“假的外部服务”。
+如果要接入真实业务，就要把 .env 里的 Provider 配置改成真实服务，并在对应 Provider 代码里补上真实接口调用。
+
+
+一、先搞懂这个项目有哪些“接口”
+--------------------------------
+
+项目启动后，浏览器打开：
+
+http://127.0.0.1:8000/docs
+
+你会看到 FastAPI 自动生成的接口文档。
+
+目前暴露出来的主要接口有：
+
+1. GET /api/v1/health
+
+作用：检查服务是否正常运行。
+
+调用成功会返回：
+
+{
+  "status": "ok",
+  "app": "smart-customer-service"
+}
+
+如果这个接口都不通，说明后端服务没有启动成功。
+
+
+2. POST /api/v1/chat
+
+作用：聊天主入口。
+
+你发给它：
+
+{
+  "sender_id": "user_001",
+  "message": "帮我查订单"
+}
+
+它会返回：
+
+{
+  "sender_id": "user_001",
+  "message": "请提供订单号"
+}
+
+这里 sender_id 是“用户身份”。同一个 sender_id 才能连续对话。
+比如先问“帮我查订单”，再发“10001”，系统才知道你是在补充订单号。
+
+
+3. GET /api/v1/providers/status
+
+作用：查看当前项目使用的是哪些 Provider。
+
+Provider 可以理解成“外部能力供应商”：
+
+- LLM Provider：大模型，比如 DeepSeek、Qwen、OpenAI、Ollama。
+- Business Provider：业务系统，比如订单系统、售后系统、会员系统。
+- Handoff Provider：人工客服系统，比如工单系统、客服 Webhook。
+- Vector Store：知识库向量检索，比如 memory、pgvector。
+
+
+4. POST /api/v1/knowledge/import
+
+作用：知识库导入接口。
+
+当前版本是 Mock/占位实现。
+现在知识文档默认从 data/knowledge/ 目录读取 Markdown 文件。
+
+如果以后要支持“后台上传文档、自动切分、生成向量、写入 pgvector”，就要扩展这个接口。
+
+
+二、先搞懂 Mock 模式
+-------------------
+
+项目默认是 Mock 模式。
+
+Mock 的意思是：假装有真实服务，但其实是代码里写好的模拟逻辑。
+
+默认 .env.example 里是这样：
+
+LLM_PROVIDER=mock
+BUSINESS_PROVIDER=mock
+HANDOFF_PROVIDER=mock
+VECTOR_STORE=memory
+TRACKER_STORE=memory
+
+所以你不用买大模型，不用订单系统，不用数据库，也能测试：
+
+用户：帮我查订单
+客服：请提供订单号
+用户：10001
+客服：订单已发货，物流单号为 SF10001
+
+但是注意：
+
+订单号 10001 和物流单号 SF10001 是模拟数据。
+人工客服工单号 MOCK-XXXXXX 也是模拟数据。
+退货政策来自 data/knowledge/return_policy.md 示例文件。
+
+
+三、真实运行前要准备什么
+------------------------
+
+如果你要让这个项目真正接入业务，通常需要准备：
+
+1. 一个大模型 API
+
+例如：
+
+- DeepSeek
+- Qwen
+- OpenAI
+- Ollama 本地模型
+
+你需要知道：
+
+- API 地址
+- API Key
+- 模型名称
+
+
+2. 一个真实订单系统接口
+
+你需要知道：
+
+- 查询订单的接口地址
+- 请求方式，是 GET 还是 POST
+- 请求参数叫什么，比如 order_id 还是 orderNo
+- 鉴权方式，比如 Bearer Token、API Key、签名
+- 返回数据格式，比如 status、tracking_no 字段在哪里
+
+
+3. 一个真实人工客服接口
+
+你需要知道：
+
+- 创建工单接口地址
+- 请求参数格式
+- 鉴权方式
+- 返回的工单号字段叫什么
+
+
+4. 可选：PostgreSQL + pgvector
+
+如果你要用真实向量知识库，需要准备：
+
+- PostgreSQL 数据库
+- pgvector 扩展
+- 向量表结构
+- Embedding 模型
+
+本项目 Docker Compose 已经准备了 PostgreSQL + pgvector 镜像。
+
+
+四、配置文件在哪里
+------------------
+
+项目根目录有一个：
+
+.env.example
+
+第一次运行时复制一份：
+
+cp .env.example .env
+
+以后真实配置都改 .env。
+
+不要把 .env 上传到 GitHub，因为里面可能有 API Key、数据库密码。
+项目里的 .gitignore 已经忽略了 .env。
+
+
+五、接入真实大模型
+------------------
+
+配置项主要是这些：
+
+LLM_PROVIDER=mock
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
+LLM_TEMPERATURE=0.1
+LLM_TIMEOUT=60
+LLM_MAX_RETRIES=2
+
+
+1. 接入 DeepSeek
+
+.env 示例：
+
+LLM_PROVIDER=deepseek
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=你的DeepSeek密钥
+LLM_MODEL=deepseek-chat
+
+
+2. 接入 Qwen
+
+.env 示例：
+
+LLM_PROVIDER=qwen
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_API_KEY=你的Qwen密钥
+LLM_MODEL=qwen-plus
+
+
+3. 接入 OpenAI
+
+.env 示例：
+
+LLM_PROVIDER=openai
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=你的OpenAI密钥
+LLM_MODEL=gpt-4.1-mini
+
+
+4. 接入 Ollama
+
+Ollama 是本地模型，不一定需要 API Key。
+
+.env 示例：
+
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434
+LLM_API_KEY=
+LLM_MODEL=qwen2.5
+
+
+重要说明：
+
+现在代码里已经有 LLMProvider 接口和 MockLLMProvider。
+真实 DeepSeek/Qwen/OpenAI/Ollama Provider 需要在代码中新增适配器。
+
+建议新增文件：
+
+app/llm/http_provider.py
+
+然后在这里实现：
+
+- health_check
+- complete_json
+
+最后到这个文件里注册：
+
+app/providers/factory.py
+
+也就是改 create_llm_provider 这个函数。
+
+业务代码不要直接 new 某个具体大模型。
+所有 Provider 都要从 Factory 创建。
+
+
+六、接入真实订单系统
+--------------------
+
+当前订单查询是 Mock：
+
+BUSINESS_PROVIDER=mock
+
+Mock 数据在：
+
+app/providers/business.py
+
+其中 MockBusinessProvider 里写了：
+
+订单号 10001 -> 已发货，物流单号 SF10001
+
+
+要接入真实订单系统，先改 .env：
+
+BUSINESS_PROVIDER=http
+BUSINESS_API_BASE_URL=https://你的订单系统域名
+BUSINESS_API_KEY=你的订单系统密钥
+BUSINESS_API_TIMEOUT=15
+
+
+然后修改：
+
+app/providers/business.py
+
+找到：
+
+class HttpBusinessProvider(BusinessProvider):
+
+里面目前是预留接口。
+
+你需要实现 get_order。
+
+举个例子，假设你的订单系统接口是：
+
+GET https://orders.example.com/api/orders/10001
+
+请求头：
+
+Authorization: Bearer xxxxxx
+
+返回：
+
+{
+  "id": "10001",
+  "status": "shipped",
+  "trackingNo": "SF10001"
+}
+
+那么 HttpBusinessProvider.get_order 最终要转换成项目统一格式：
+
+{
+  "order_id": "10001",
+  "status": "已发货",
+  "tracking_no": "SF10001"
+}
+
+为什么要转换？
+
+因为项目里的 Action 不应该关心每个公司订单系统字段叫什么。
+Action 只认统一字段：
+
+- order_id
+- status
+- tracking_no
+
+这样以后换订单系统，改 Provider 就行，不用改 Flow 和 Agent。
+
+
+七、接入真实人工客服系统
+------------------------
+
+当前人工客服是 Mock：
+
+HANDOFF_PROVIDER=mock
+
+它会生成类似：
+
+MOCK-AB12CD34
+
+这不是真实工单。
+
+
+要接入真实人工客服，改 .env：
+
+HANDOFF_PROVIDER=webhook
+HANDOFF_WEBHOOK_URL=https://你的客服系统/webhook
+HANDOFF_API_KEY=你的客服系统密钥
+
+
+然后修改：
+
+app/providers/handoff.py
+
+找到：
+
+class WebhookHandoffProvider(HandoffProvider):
+
+实现 create_ticket。
+
+假设你的客服系统接口是：
+
+POST https://support.example.com/tickets
+
+请求：
+
+{
+  "user_id": "user_001",
+  "content": "我要转人工客服"
+}
+
+返回：
+
+{
+  "ticket_id": "T202506210001"
+}
+
+那么 create_ticket 要返回统一格式：
+
+{
+  "ticket_id": "T202506210001",
+  "sender_id": "user_001",
+  "message": "我要转人工客服"
+}
+
+
+八、接入真实知识库
+------------------
+
+当前知识库来源是：
+
+data/knowledge/return_policy.md
+
+启动时，系统会读取这个 Markdown 文件。
+
+当用户问：
+
+你们支持七天无理由退货吗
+
+系统会从这个示例文档里返回答案和来源。
+
+
+如果你只是想改知识内容：
+
+直接把 Markdown 文件放到：
+
+data/knowledge/
+
+然后重启服务。
+
+
+如果你想做真实知识库，一般要做这些步骤：
+
+1. 上传文档
+2. 读取文档内容
+3. 清洗文本
+4. 切成小块 Chunk
+5. 调用 Embedding 模型生成向量
+6. 存入 pgvector
+7. 用户提问时向量检索
+8. Rerank 重排
+9. 拼接引用来源
+10. 交给大模型生成最终回答
+
+
+当前项目里相关目录：
+
+app/rag/document.py       文档读取、清洗、切分
+app/rag/providers.py      Embedding 和 Rerank Provider
+app/rag/vector_store.py   向量存储接口
+app/rag/retriever.py      检索
+app/rag/service.py        RAG 回答和引用格式
+
+
+九、接入 BGE-M3 Embedding
+-------------------------
+
+BGE-M3 常用于中文知识库向量化。
+
+.env 示例：
+
+EMBEDDING_PROVIDER=bge-m3
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_BASE_URL=http://你的embedding服务地址
+EMBEDDING_API_KEY=你的密钥
+EMBEDDING_DIMENSION=1024
+
+
+如果你的 BGE-M3 是本地服务，需要确认：
+
+- 服务地址
+- 请求格式
+- 返回向量字段
+- 向量维度
+
+然后新增真实 Embedding Provider，并在 app/providers/factory.py 中创建。
+
+
+十、切换 pgvector
+-----------------
+
+当前默认：
+
+VECTOR_STORE=memory
+
+意思是知识向量只存在内存里，重启后就没了。
+
+
+要切换 pgvector，改 .env：
+
+VECTOR_STORE=pgvector
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/customer_service
+
+
+Docker Compose 里已经包含：
+
+postgres:
+  image: pgvector/pgvector:pg16
+
+
+启动：
+
+docker compose up --build
+
+
+注意：
+
+当前代码已经预留 VectorStore 接口，但 pgvector 的真实写入和检索还需要实现。
+建议在 app/rag/vector_store.py 里新增 PgVectorStore。
+
+
+十一、Docker 模式怎么跑
+-----------------------
+
+第一步，复制配置：
+
+cp .env.example .env
+
+第二步，启动：
+
+docker compose up --build
+
+启动后访问：
+
+http://127.0.0.1:8000/docs
+
+
+Docker Compose 会启动：
+
+- app：FastAPI 应用
+- postgres：PostgreSQL + pgvector
+- redis：Redis
+
+
+十二、本地开发模式怎么跑
+------------------------
+
+第一步：
+
+cp .env.example .env
+
+第二步：
+
+uv sync --extra dev
+
+第三步：
+
+uv run uvicorn app.main:app --reload
+
+打开：
+
+http://127.0.0.1:8000/docs
+
+
+十三、如何测试是否跑通
+----------------------
+
+1. 健康检查
+
+curl http://127.0.0.1:8000/api/v1/health
+
+看到：
+
+{"status":"ok","app":"smart-customer-service"}
+
+说明服务正常。
+
+
+2. 订单流程
+
+第一句：
+
+curl -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"sender_id":"user_001","message":"帮我查订单"}'
+
+应该返回：
+
+请提供订单号
+
+第二句：
+
+curl -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"sender_id":"user_001","message":"10001"}'
+
+Mock 模式下应该返回：
+
+订单已发货，物流单号为 SF10001
+
+
+3. 知识问答
+
+curl -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"sender_id":"user_002","message":"你们支持七天无理由退货吗"}'
+
+应该返回退货政策，并包含“来源”。
+
+
+4. 转人工
+
+curl -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"sender_id":"user_003","message":"转人工客服"}'
+
+Mock 模式下应该返回模拟工单号。
+
+
+十四、上线前必须检查
+--------------------
+
+上线前请检查：
+
+1. .env 不要上传 GitHub。
+2. LLM_API_KEY 不要写进代码。
+3. BUSINESS_API_KEY 不要写进代码。
+4. HANDOFF_API_KEY 不要写进代码。
+5. DEBUG 生产环境建议改成 false。
+6. 数据库密码不要用 postgres/postgres。
+7. 真实 Provider 必须有 health_check。
+8. 外部接口失败时必须有降级回复。
+9. 订单、手机号、地址等敏感信息要按公司要求脱敏。
+10. 日志不要打印完整 API Key。
+
+
+十五、小白最容易混淆的点
+------------------------
+
+1. /docs 不是你的业务页面
+
+/docs 是接口测试页面，不是给最终用户聊天的网页。
+真正给用户用的前端页面以后可以单独开发。
+
+
+2. /api/v1/chat 才是聊天入口
+
+所有用户消息都应该发到 /api/v1/chat。
+
+
+3. sender_id 很重要
+
+同一个用户连续聊天，要用同一个 sender_id。
+否则系统会以为这是另一个新用户。
+
+
+4. Mock 不等于真实能力
+
+Mock 只是为了让项目先跑起来。
+真实上线必须替换 LLM、订单、人工客服、知识库等 Provider。
+
+
+5. 改 .env 后要重启服务
+
+很多配置只在启动时读取。
+改完 .env 后，建议重启 uvicorn 或 docker compose。
+
+
+十六、推荐接入顺序
+------------------
+
+建议不要一口气全换成真的。
+
+推荐顺序：
+
+第一步：保持 LLM_PROVIDER=mock，只接真实订单系统。
+
+这样能先验证业务接口是否通。
+
+第二步：接真实人工客服 Webhook。
+
+第三步：把知识文档换成你自己的 Markdown。
+
+第四步：接真实 Embedding 和 pgvector。
+
+第五步：最后接真实大模型。
+
+这样出问题时更容易定位。
+
+
+十七、最小真实订单接入清单
+--------------------------
+
+如果你只想先让“查订单”变成真的，需要完成：
+
+1. 找到订单系统接口文档。
+2. 确认查询订单接口 URL。
+3. 确认请求参数。
+4. 确认鉴权方式。
+5. 确认返回 JSON 字段。
+6. 修改 .env：
+
+BUSINESS_PROVIDER=http
+BUSINESS_API_BASE_URL=真实订单系统地址
+BUSINESS_API_KEY=真实密钥
+
+7. 实现 app/providers/business.py 里的 HttpBusinessProvider.get_order。
+8. 运行测试。
+9. 启动服务。
+10. 调用 /api/v1/chat 测试。
+
+
+十八、最小真实大模型接入清单
+----------------------------
+
+如果你只想先接真实大模型，需要完成：
+
+1. 选择模型厂商，比如 DeepSeek、Qwen、OpenAI。
+2. 获取 API Key。
+3. 确认 base_url。
+4. 确认 model 名称。
+5. 修改 .env。
+6. 新增真实 LLM Provider。
+7. 在 app/providers/factory.py 里根据 LLM_PROVIDER 创建它。
+8. 确保 complete_json 返回 CommandParser 能识别的 JSON。
+
+CommandParser 期望类似：
+
+{
+  "type": "start_flow",
+  "name": "query_order",
+  "confidence": 0.95
+}
+
+或者：
+
+{
+  "type": "knowledge_qa",
+  "confidence": 0.95
+}
+
+
+十九、最终判断是否完全跑通
+--------------------------
+
+完成真实接口接入后，至少跑这些命令：
+
+python -m compileall app
+uv run pytest -q
+uv run ruff check .
+
+然后启动：
+
+uv run uvicorn app.main:app --reload
+
+再测试：
+
+1. /api/v1/health 正常。
+2. /api/v1/chat 能正常聊天。
+3. 查真实订单能返回真实物流。
+4. 转人工能在真实客服系统生成工单。
+5. 知识问答能返回真实知识来源。
+6. 外部接口故障时不会让系统崩溃，而是返回友好的降级提示。
+
+
+二十、当前项目状态
+------------------
+
+当前 GitHub 版本已经具备：
+
+- FastAPI 接口
+- Mock 大模型
+- Mock 订单系统
+- Mock 人工客服
+- Memory 知识库
+- Flow 流程
+- Action 动作
+- Policy 策略
+- RAG 引用格式
+- Docker Compose
+- PostgreSQL + pgvector 镜像配置
+- Redis 镜像配置
+- pytest 测试
+- Ruff 检查
+
+当前还需要你根据真实业务协议补充：
+
+- 真实 LLM Provider
+- 真实 Business Provider
+- 真实 Handoff Provider
+- 真实 PgVectorStore
+- 真实知识导入流程
+
+如果你只是学习和演示，保持 Mock 模式就已经可以完整运行。
+
