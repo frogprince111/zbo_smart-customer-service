@@ -6,7 +6,16 @@
 你可以先记住一句话：
 
 当前项目已经可以在 Mock 模式下完整跑通，但 Mock 是“假的外部服务”。
-如果要接入真实业务，就要把 .env 里的 Provider 配置改成真实服务，并在对应 Provider 代码里补上真实接口调用。
+如果要接入真实业务，优先只改两个地方：
+
+1. .env
+   用来决定启用 mock 还是真实 Provider。
+
+2. config/external_interfaces.yaml
+   用来填写真实 URL、API Key、请求头、请求体、返回字段映射。
+
+普通 HTTP + JSON 接口一般不用改业务代码。
+只有遇到非常特殊的接口，比如签名、加密、多次请求合并、分页拉取，才需要补 Provider 适配代码。
 
 
 一、先搞懂这个项目有哪些“接口”
@@ -164,7 +173,7 @@ TRACKER_STORE=memory
 四、配置文件在哪里
 ------------------
 
-项目根目录有一个：
+项目根目录有一个环境变量模板：
 
 .env.example
 
@@ -172,54 +181,143 @@ TRACKER_STORE=memory
 
 cp .env.example .env
 
-以后真实配置都改 .env。
+这个 .env 主要放“开关类配置”，比如：
+
+- 当前用 mock 还是真实接口
+- 配置文件路径
+- 数据库地址
+- Redis 地址
+- 运行端口
+
+真实外部接口的 URL、API Key、字段映射，建议统一放到：
+
+config/external_interfaces.yaml
+
+这个文件要从模板复制：
+
+cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+
+然后在 .env 里确认：
+
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 
 不要把 .env 上传到 GitHub，因为里面可能有 API Key、数据库密码。
-项目里的 .gitignore 已经忽略了 .env。
+不要把 config/external_interfaces.yaml 上传到 GitHub，因为里面也可能有 API Key。
+项目里的 .gitignore 已经忽略了这两个文件。
+
+可以上传 GitHub 的是：
+
+config/external_interfaces.example.yaml
+
+它只是模板，不应该写真实密钥。
 
 
 五、接入真实大模型
 ------------------
 
-配置项主要是这些：
+现在推荐使用统一外部接口配置文件来接真实大模型。
 
-LLM_PROVIDER=mock
-LLM_BASE_URL=
-LLM_API_KEY=
-LLM_MODEL=
-LLM_TEMPERATURE=0.1
-LLM_TIMEOUT=60
-LLM_MAX_RETRIES=2
+第一步，改 .env：
+
+LLM_PROVIDER=http
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+第二步，复制模板：
+
+cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+
+第三步，修改 config/external_interfaces.yaml 里的 llm 段：
+
+llm:
+  enabled: true
+  url: "真实大模型接口地址"
+  method: "POST"
+  api_key: "真实 API Key"
+  model: "真实模型名"
+  timeout: 60
+  headers:
+    Authorization: "Bearer {api_key}"
+    Content-Type: "application/json"
+  body:
+    model: "{model}"
+    temperature: 0.1
+    messages:
+      - role: "system"
+        content: "你是客服意图识别器，只返回 JSON，不要输出解释。"
+      - role: "user"
+        content: "{prompt}"
+  content_path: "choices.0.message.content"
+
+这里几个字段是什么意思：
+
+- enabled：是否启用这个真实接口。
+- url：真实大模型接口地址。
+- api_key：你的密钥。
+- model：模型名称。
+- headers：请求头，{api_key} 会自动替换。
+- body：请求体，{prompt} 会自动替换成系统生成的提示词。
+- content_path：从接口返回 JSON 里取回答内容的位置。
 
 
 1. 接入 DeepSeek
 
 .env 示例：
 
-LLM_PROVIDER=deepseek
-LLM_BASE_URL=https://api.deepseek.com
-LLM_API_KEY=你的DeepSeek密钥
-LLM_MODEL=deepseek-chat
+LLM_PROVIDER=http
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+config/external_interfaces.yaml 的 llm 示例：
+
+llm:
+  enabled: true
+  url: "https://api.deepseek.com/chat/completions"
+  method: "POST"
+  api_key: "你的DeepSeek密钥"
+  model: "deepseek-chat"
+  headers:
+    Authorization: "Bearer {api_key}"
+    Content-Type: "application/json"
+  body:
+    model: "{model}"
+    temperature: 0.1
+    messages:
+      - role: "system"
+        content: "你是客服意图识别器，只返回 JSON，不要输出解释。"
+      - role: "user"
+        content: "{prompt}"
+  content_path: "choices.0.message.content"
 
 
 2. 接入 Qwen
 
 .env 示例：
 
-LLM_PROVIDER=qwen
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_API_KEY=你的Qwen密钥
-LLM_MODEL=qwen-plus
+LLM_PROVIDER=http
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+config/external_interfaces.yaml 的 llm.url 示例：
+
+https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+
+model 可以填：
+
+qwen-plus
 
 
 3. 接入 OpenAI
 
 .env 示例：
 
-LLM_PROVIDER=openai
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=你的OpenAI密钥
-LLM_MODEL=gpt-4.1-mini
+LLM_PROVIDER=http
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+config/external_interfaces.yaml 的 llm.url 示例：
+
+https://api.openai.com/v1/chat/completions
+
+model 可以填：
+
+gpt-4.1-mini
 
 
 4. 接入 Ollama
@@ -228,31 +326,39 @@ Ollama 是本地模型，不一定需要 API Key。
 
 .env 示例：
 
-LLM_PROVIDER=ollama
-LLM_BASE_URL=http://localhost:11434
-LLM_API_KEY=
-LLM_MODEL=qwen2.5
+LLM_PROVIDER=http
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+Ollama 的接口格式和 OpenAI 兼容接口可能不一样。
+如果你使用 Ollama OpenAI 兼容接口，llm.url 可以写：
+
+http://localhost:11434/v1/chat/completions
+
+model 可以写：
+
+qwen2.5
 
 
 重要说明：
 
-现在代码里已经有 LLMProvider 接口和 MockLLMProvider。
-真实 DeepSeek/Qwen/OpenAI/Ollama Provider 需要在代码中新增适配器。
+现在代码里已经有 HttpLLMProvider。
+普通 OpenAI 兼容接口可以通过 config/external_interfaces.yaml 配置，不需要新增 Provider。
 
-建议新增文件：
+但是大模型必须返回 CommandParser 能识别的 JSON。
+例如识别“查订单”时，大模型最终内容要是：
 
-app/llm/http_provider.py
+{
+  "type": "start_flow",
+  "name": "query_order",
+  "confidence": 0.95
+}
 
-然后在这里实现：
+识别“知识问答”时：
 
-- health_check
-- complete_json
-
-最后到这个文件里注册：
-
-app/providers/factory.py
-
-也就是改 create_llm_provider 这个函数。
+{
+  "type": "knowledge_qa",
+  "confidence": 0.95
+}
 
 业务代码不要直接 new 某个具体大模型。
 所有 Provider 都要从 Factory 创建。
@@ -277,22 +383,11 @@ app/providers/business.py
 要接入真实订单系统，先改 .env：
 
 BUSINESS_PROVIDER=http
-BUSINESS_API_BASE_URL=https://你的订单系统域名
-BUSINESS_API_KEY=你的订单系统密钥
-BUSINESS_API_TIMEOUT=15
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 
+然后修改 config/external_interfaces.yaml 里的：
 
-然后修改：
-
-app/providers/business.py
-
-找到：
-
-class HttpBusinessProvider(BusinessProvider):
-
-里面目前是预留接口。
-
-你需要实现 get_order。
+business.order_query
 
 举个例子，假设你的订单系统接口是：
 
@@ -329,6 +424,49 @@ Action 只认统一字段：
 
 这样以后换订单系统，改 Provider 就行，不用改 Flow 和 Agent。
 
+现在这个转换可以通过 response_mapping 配置完成。
+
+如果真实接口返回：
+
+{
+  "data": {
+    "id": "10001",
+    "status": "shipped",
+    "logistics": {
+      "trackingNo": "SF10001"
+    }
+  }
+}
+
+那么 config/external_interfaces.yaml 可以这样写：
+
+business:
+  order_query:
+    enabled: true
+    url: "https://orders.example.com/api/orders/{order_id}"
+    method: "GET"
+    api_key: "你的订单系统密钥"
+    timeout: 15
+    headers:
+      Authorization: "Bearer {api_key}"
+      Content-Type: "application/json"
+    body: {}
+    response_mapping:
+      order_id: "data.id"
+      status: "data.status"
+      tracking_no: "data.logistics.trackingNo"
+    status_mapping:
+      shipped: "已发货"
+      paid: "已付款"
+      pending: "待处理"
+      cancelled: "已取消"
+
+注意：
+
+- {order_id} 会自动替换成用户输入的订单号。
+- {api_key} 会自动替换成本段 api_key。
+- data.logistics.trackingNo 表示从返回 JSON 里一层层取字段。
+
 
 七、接入真实人工客服系统
 ------------------------
@@ -347,19 +485,11 @@ MOCK-AB12CD34
 要接入真实人工客服，改 .env：
 
 HANDOFF_PROVIDER=webhook
-HANDOFF_WEBHOOK_URL=https://你的客服系统/webhook
-HANDOFF_API_KEY=你的客服系统密钥
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 
+然后修改 config/external_interfaces.yaml 里的：
 
-然后修改：
-
-app/providers/handoff.py
-
-找到：
-
-class WebhookHandoffProvider(HandoffProvider):
-
-实现 create_ticket。
+handoff.create_ticket
 
 假设你的客服系统接口是：
 
@@ -385,6 +515,38 @@ POST https://support.example.com/tickets
   "sender_id": "user_001",
   "message": "我要转人工客服"
 }
+
+现在可以这样配置：
+
+handoff:
+  create_ticket:
+    enabled: true
+    url: "https://support.example.com/tickets"
+    method: "POST"
+    api_key: "你的客服系统密钥"
+    timeout: 15
+    headers:
+      Authorization: "Bearer {api_key}"
+      Content-Type: "application/json"
+    body:
+      user_id: "{sender_id}"
+      content: "{message}"
+      source: "smart-customer-service"
+    response_mapping:
+      ticket_id: "ticket_id"
+
+如果真实接口返回：
+
+{
+  "data": {
+    "ticketId": "T202506210001"
+  }
+}
+
+那么 response_mapping 要写：
+
+response_mapping:
+  ticket_id: "data.ticketId"
 
 
 八、接入真实知识库
@@ -674,13 +836,16 @@ Mock 只是为了让项目先跑起来。
 6. 修改 .env：
 
 BUSINESS_PROVIDER=http
-BUSINESS_API_BASE_URL=真实订单系统地址
-BUSINESS_API_KEY=真实密钥
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 
-7. 实现 app/providers/business.py 里的 HttpBusinessProvider.get_order。
-8. 运行测试。
-9. 启动服务。
-10. 调用 /api/v1/chat 测试。
+7. 复制模板：
+
+cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+
+8. 修改 config/external_interfaces.yaml 的 business.order_query。
+9. 运行测试。
+10. 启动服务。
+11. 调用 /api/v1/chat 测试。
 
 
 十八、最小真实大模型接入清单
@@ -693,9 +858,8 @@ BUSINESS_API_KEY=真实密钥
 3. 确认 base_url。
 4. 确认 model 名称。
 5. 修改 .env。
-6. 新增真实 LLM Provider。
-7. 在 app/providers/factory.py 里根据 LLM_PROVIDER 创建它。
-8. 确保 complete_json 返回 CommandParser 能识别的 JSON。
+6. 复制并修改 config/external_interfaces.yaml 的 llm 段。
+7. 确保大模型返回 CommandParser 能识别的 JSON。
 
 CommandParser 期望类似：
 
@@ -766,3 +930,75 @@ uv run uvicorn app.main:app --reload
 
 如果你只是学习和演示，保持 Mock 模式就已经可以完整运行。
 
+
+二十一、统一外部接口配置文件
+----------------------------
+
+现在项目已经新增一个统一模板：
+
+config/external_interfaces.example.yaml
+
+真实使用时，不要直接改 example 文件。
+请复制一份：
+
+cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+
+然后在 .env 里确认：
+
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+
+如果你要接真实大模型：
+
+LLM_PROVIDER=http
+
+然后修改 config/external_interfaces.yaml 里的 llm 段：
+
+- enabled 改成 true
+- url 写真实大模型地址
+- api_key 写真实密钥
+- model 写真实模型名
+- headers 写真实请求头
+- body 写真实请求体模板
+- content_path 写返回内容所在字段
+
+如果你要接真实订单系统：
+
+BUSINESS_PROVIDER=http
+
+然后修改 business.order_query：
+
+- enabled 改成 true
+- url 写订单查询接口
+- method 写 GET 或 POST
+- api_key 写订单系统密钥
+- headers 写请求头
+- body 写请求体
+- response_mapping 写返回字段映射
+- status_mapping 写状态值翻译
+
+如果你要接真实人工客服：
+
+HANDOFF_PROVIDER=webhook
+
+然后修改 handoff.create_ticket：
+
+- enabled 改成 true
+- url 写创建工单接口
+- method 一般写 POST
+- api_key 写客服系统密钥
+- body 写要提交给客服系统的数据
+- response_mapping.ticket_id 写工单号字段路径
+
+这样做的好处是：
+
+1. 小白不用到处翻代码找接口地址。
+2. URL、API Key、字段映射都集中在一个文件。
+3. config/external_interfaces.yaml 已经被 .gitignore 忽略，不会上传 GitHub。
+4. 代码仍然遵守“业务代码不能直接实例化具体 Provider”的要求。
+
+注意：
+
+不是所有公司的接口格式都一样。
+如果你的真实接口非常特殊，比如需要签名、加密、分页、多次请求合并，
+那仍然需要在 Provider 里补少量适配代码。
+但普通的 URL、Header、JSON Body、JSON 字段映射，已经可以通过这个配置文件完成。

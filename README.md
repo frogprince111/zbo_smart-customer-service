@@ -44,6 +44,14 @@ uv sync
 uv run uvicorn app.main:app --reload
 ```
 
+真实外部接口集中配置模板在 `config/external_interfaces.example.yaml`。需要接真实接口时：
+
+```bash
+cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+```
+
+然后在 `.env` 中把对应 Provider 改成 `http` 或 `webhook`，并在 `config/external_interfaces.yaml` 里填写真实 URL、API Key、请求体和返回字段映射。
+
 不使用 `uv` 时：
 
 ```bash
@@ -127,9 +135,10 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/customer_servi
 BUSINESS_PROVIDER=http
 BUSINESS_API_BASE_URL=https://orders.example.com
 BUSINESS_API_KEY=你的业务系统密钥
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 ```
 
-然后实现 `HttpBusinessProvider.get_order` 的协议映射，Action 和 Flow 无需修改。
+然后复制并修改 `config/external_interfaces.yaml` 里的 `business.order_query`，填写 URL、headers、body 和 `response_mapping`。Action 和 Flow 无需修改。
 
 ## 接入人工客服 Webhook
 
@@ -137,9 +146,10 @@ BUSINESS_API_KEY=你的业务系统密钥
 HANDOFF_PROVIDER=webhook
 HANDOFF_WEBHOOK_URL=https://support.example.com/webhook
 HANDOFF_API_KEY=你的密钥
+EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
 ```
 
-在 `WebhookHandoffProvider.create_ticket` 中补充真实 HTTP 调用。
+然后复制并修改 `config/external_interfaces.yaml` 里的 `handoff.create_ticket`。
 
 ## 新增 Flow
 

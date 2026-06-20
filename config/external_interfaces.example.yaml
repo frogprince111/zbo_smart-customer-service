@@ -1,0 +1,204 @@
+# 真实外部接口配置模板
+# ==================
+#
+# 使用方法：
+# 1. 复制本文件：
+#    cp config/external_interfaces.example.yaml config/external_interfaces.yaml
+#
+# 2. 修改 .env：
+#    EXTERNAL_INTERFACES_CONFIG=config/external_interfaces.yaml
+#    LLM_PROVIDER=http
+#    BUSINESS_PROVIDER=http
+#    HANDOFF_PROVIDER=webhook
+#
+# 3. 把下面的 url、api_key、字段映射改成你自己的真实接口。
+#
+# 注意：
+# - external_interfaces.yaml 里面可能写真实密钥，所以已经被 .gitignore 忽略，不会上传 GitHub。
+# - 这个 example 文件不要写真实密钥，只放模板。
+# - headers 里的 {api_key} 会自动替换成本段配置里的 api_key。
+# - url 里的 {order_id}、body 里的 {sender_id}、{message} 也会自动替换。
+# - response_mapping 表示“从真实接口返回 JSON 里取哪个字段，转换成项目内部统一字段”。
+
+llm:
+  # enabled=false 表示暂时不用真实大模型，仍然可以用 Mock。
+  # 如果你在 .env 中设置 LLM_PROVIDER=http，这里建议改成 true。
+  enabled: false
+
+  # 真实大模型接口地址。
+  # OpenAI 兼容接口通常是 /chat/completions。
+  # DeepSeek 示例：https://api.deepseek.com/chat/completions
+  # Qwen 兼容模式示例：https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  # Ollama 示例：http://localhost:11434/api/chat
+  url: "https://api.example.com/v1/chat/completions"
+
+  # 请求方法，一般是 POST。
+  method: "POST"
+
+  # API Key。真实配置写到 config/external_interfaces.yaml，不要写在这个 example 文件里。
+  api_key: "replace-with-your-llm-api-key"
+
+  # 模型名称。
+  model: "replace-with-model-name"
+
+  # 超时时间，单位秒。
+  timeout: 60
+
+  # 请求头。
+  headers:
+    Authorization: "Bearer {api_key}"
+    Content-Type: "application/json"
+
+  # 请求体模板。
+  # {model} 会替换成上面的 model。
+  # {prompt} 会替换成系统生成的命令识别提示词。
+  body:
+    model: "{model}"
+    temperature: 0.1
+    messages:
+      - role: "system"
+        content: "你是客服意图识别器，只返回 JSON，不要输出解释。"
+      - role: "user"
+        content: "{prompt}"
+
+  # 大模型返回内容所在字段路径。
+  # OpenAI / DeepSeek / Qwen 兼容格式通常是 choices.0.message.content。
+  # 如果你的接口直接返回 {"type":"start_flow"}，可以写空字符串 ""。
+  content_path: "choices.0.message.content"
+
+
+business:
+  # 订单系统配置。
+  order_query:
+    # enabled=false 时，即使 BUSINESS_PROVIDER=http，也建议先别连真实系统。
+    # 准备好真实接口后改成 true。
+    enabled: false
+
+    # 查询订单接口。
+    # 如果你的订单号在路径里，可以写：
+    # url: "https://orders.example.com/api/orders/{order_id}"
+    #
+    # 如果你的订单号在 query 参数里，可以写：
+    # url: "https://orders.example.com/api/orders?order_id={order_id}"
+    url: "https://orders.example.com/api/orders/{order_id}"
+
+    # 请求方法，常见是 GET 或 POST。
+    method: "GET"
+
+    # 订单系统 API Key。
+    api_key: "replace-with-business-api-key"
+
+    # 超时时间，单位秒。
+    timeout: 15
+
+    # 请求头。
+    headers:
+      Authorization: "Bearer {api_key}"
+      Content-Type: "application/json"
+
+    # 请求体。
+    # GET 请求一般不需要 body，可以保持为空对象 {}。
+    # POST 请求可以改成：
+    # body:
+    #   order_id: "{order_id}"
+    body: {}
+
+    # 返回字段映射。
+    # 左边是项目内部统一字段，右边是真实接口 JSON 路径。
+    #
+    # 例如真实接口返回：
+    # {
+    #   "data": {
+    #     "id": "10001",
+    #     "status": "shipped",
+    #     "logistics": {
+    #       "trackingNo": "SF10001"
+    #     }
+    #   }
+    # }
+    #
+    # 那么就写：
+    # order_id: "data.id"
+    # status: "data.status"
+    # tracking_no: "data.logistics.trackingNo"
+    response_mapping:
+      order_id: "data.id"
+      status: "data.status"
+      tracking_no: "data.logistics.trackingNo"
+
+    # 状态值映射。
+    # 真实系统可能返回 shipped、paid、cancelled，项目内部想显示中文。
+    status_mapping:
+      shipped: "已发货"
+      paid: "已付款"
+      pending: "待处理"
+      cancelled: "已取消"
+      not_found: "未找到"
+
+
+handoff:
+  # 人工客服/工单系统配置。
+  create_ticket:
+    enabled: false
+
+    # 创建工单接口。
+    url: "https://support.example.com/api/tickets"
+
+    # 一般是 POST。
+    method: "POST"
+
+    # 人工客服系统 API Key。
+    api_key: "replace-with-handoff-api-key"
+
+    timeout: 15
+
+    headers:
+      Authorization: "Bearer {api_key}"
+      Content-Type: "application/json"
+
+    # 请求体模板。
+    # {sender_id} 会替换成用户 ID。
+    # {message} 会替换成用户说的话。
+    body:
+      user_id: "{sender_id}"
+      content: "{message}"
+      source: "smart-customer-service"
+
+    # 返回字段映射。
+    # 如果真实接口返回 {"data":{"ticketId":"T001"}}，就写 data.ticketId。
+    response_mapping:
+      ticket_id: "data.ticketId"
+
+
+knowledge:
+  # 知识库导入/检索配置。目前项目默认读取 data/knowledge/*.md。
+  # 这里先作为真实知识库接口模板，后续可以扩展 /api/v1/knowledge/import 使用。
+  import_documents:
+    enabled: false
+    url: "https://knowledge.example.com/api/import"
+    method: "POST"
+    api_key: "replace-with-knowledge-api-key"
+    timeout: 60
+    headers:
+      Authorization: "Bearer {api_key}"
+      Content-Type: "application/json"
+
+
+embedding:
+  # Embedding 模型配置，例如 BGE-M3。
+  enabled: false
+  url: "http://embedding.example.com/embed"
+  method: "POST"
+  api_key: "replace-with-embedding-api-key"
+  model: "bge-m3"
+  dimension: 1024
+  timeout: 60
+  headers:
+    Authorization: "Bearer {api_key}"
+    Content-Type: "application/json"
+  body:
+    model: "{model}"
+    input: "{text}"
+  response_mapping:
+    vector: "data.embedding"
+

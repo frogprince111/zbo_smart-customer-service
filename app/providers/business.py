@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 
+import httpx
+
 from app.core.errors import ProviderError
+from app.core.interface_config import OrderQueryConfig, get_by_path, render_template
 
 
 class BusinessProvider(ABC):
@@ -29,14 +32,48 @@ class MockBusinessProvider(BusinessProvider):
 
 
 class HttpBusinessProvider(BusinessProvider):
-    def __init__(self, base_url: str, api_key: str, timeout: int):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: int,
+        order_query_config: OrderQueryConfig | None = None,
+    ):
         self.base_url = base_url
         self.api_key = api_key
         self.timeout = timeout
+        self.order_query_config = order_query_config or OrderQueryConfig()
 
     async def health_check(self) -> bool:
-        return bool(self.base_url)
+        return bool(self.base_url or self.order_query_config.url)
 
     async def get_order(self, order_id: str) -> dict[str, str]:
-        raise ProviderError("HTTP 订单 Provider 已预留接口，请按真实协议实现适配器")
+        if not self.order_query_config.enabled:
+            raise ProviderError("订单 HTTP 接口未启用，请配置 external_interfaces.yaml 的 business.order_query.enabled")
+        variables = {
+            "order_id": order_id,
+            "api_key": self.order_query_config.api_key or self.api_key,
+        }
+        url = render_template(self.order_query_config.url or self.base_url, variables)
+        headers = render_template(self.order_query_config.headers, variables)
+        body = render_template(self.order_query_config.body, variables)
+        method = self.order_query_config.method.upper()
+        try:
+            async with httpx.AsyncClient(timeout=self.order_query_config.timeout or self.timeout) as client:
+                if method == "GET":
+                    response = await client.get(url, headers=headers)
+                else:
+                    response = await client.request(method, url, headers=headers, json=body)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise ProviderError(f"订单 HTTP 接口调用失败: {exc}") from exc
 
+        mapping = self.order_query_config.response_mapping
+        status = str(get_by_path(payload, mapping.get("status", ""), ""))
+        normalized_status = self.order_query_config.status_mapping.get(status, status or "未找到")
+        return {
+            "order_id": str(get_by_path(payload, mapping.get("order_id", ""), order_id)),
+            "status": normalized_status,
+            "tracking_no": str(get_by_path(payload, mapping.get("tracking_no", ""), "")),
+        }

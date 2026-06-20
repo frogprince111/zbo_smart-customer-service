@@ -3,6 +3,7 @@ from pathlib import Path
 from app.actions.builtin import HandoffAction, QueryOrderAction
 from app.actions.registry import ActionRegistry
 from app.core.config import Settings
+from app.core.interface_config import ExternalInterfacesConfig, load_external_interfaces_config
 from app.domain.store import MemoryTrackerStore, TrackerStore
 from app.flows.conditions import ConditionEvaluator
 from app.flows.executor import FlowExecutor
@@ -11,7 +12,7 @@ from app.flows.validator import FlowValidator
 from app.graph.agent import Agent
 from app.llm.parser import CommandParser
 from app.llm.processor import CommandProcessor
-from app.llm.provider import LLMProvider, MockLLMProvider
+from app.llm.provider import HttpLLMProvider, LLMProvider, MockLLMProvider
 from app.policies.builtin import CommandPolicy, FallbackPolicy
 from app.policies.ensemble import PolicyEnsemble
 from app.providers.business import BusinessProvider, HttpBusinessProvider, MockBusinessProvider
@@ -23,22 +24,31 @@ from app.rag.service import RAGService
 from app.rag.vector_store import MemoryVectorStore, VectorStore
 
 
-def create_llm_provider(settings: Settings) -> LLMProvider:
+def create_llm_provider(settings: Settings, interfaces: ExternalInterfacesConfig) -> LLMProvider:
     if settings.llm_provider == "mock":
         return MockLLMProvider()
-    return MockLLMProvider()
+    return HttpLLMProvider(interfaces.llm)
 
 
-def create_business_provider(settings: Settings) -> BusinessProvider:
+def create_business_provider(settings: Settings, interfaces: ExternalInterfacesConfig) -> BusinessProvider:
     if settings.business_provider == "mock":
         return MockBusinessProvider()
-    return HttpBusinessProvider(settings.business_api_base_url, settings.business_api_key, settings.business_api_timeout)
+    return HttpBusinessProvider(
+        settings.business_api_base_url,
+        settings.business_api_key,
+        settings.business_api_timeout,
+        interfaces.business.order_query,
+    )
 
 
-def create_handoff_provider(settings: Settings) -> HandoffProvider:
+def create_handoff_provider(settings: Settings, interfaces: ExternalInterfacesConfig) -> HandoffProvider:
     if settings.handoff_provider == "mock":
         return MockHandoffProvider()
-    return WebhookHandoffProvider(settings.handoff_webhook_url, settings.handoff_api_key)
+    return WebhookHandoffProvider(
+        settings.handoff_webhook_url,
+        settings.handoff_api_key,
+        interfaces.handoff.create_ticket,
+    )
 
 
 def create_tracker_store(settings: Settings) -> TrackerStore:
@@ -67,9 +77,10 @@ async def create_rag_service(settings: Settings) -> RAGService:
 
 
 async def create_agent(settings: Settings) -> Agent:
-    llm = create_llm_provider(settings)
-    business = create_business_provider(settings)
-    handoff = create_handoff_provider(settings)
+    interfaces = load_external_interfaces_config(settings.external_interfaces_config)
+    llm = create_llm_provider(settings, interfaces)
+    business = create_business_provider(settings, interfaces)
+    handoff = create_handoff_provider(settings, interfaces)
     actions = ActionRegistry()
     actions.register(QueryOrderAction(business))
     actions.register(HandoffAction(handoff))

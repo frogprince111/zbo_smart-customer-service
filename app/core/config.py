@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     max_history_messages: int = 20
     session_ttl_seconds: int = 86400
     flow_dir: str = Field(default="flows")
+    external_interfaces_config: str = "config/external_interfaces.yaml"
 
     @field_validator("llm_provider", "embedding_provider", "rerank_provider", "business_provider")
     @classmethod
@@ -73,4 +74,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

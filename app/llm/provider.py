@@ -1,5 +1,11 @@
 from abc import ABC, abstractmethod
+import json
 from typing import Any
+
+import httpx
+
+from app.core.errors import ProviderError
+from app.core.interface_config import LLMEndpointConfig, get_by_path, render_template
 
 
 class LLMProvider(ABC):
@@ -38,3 +44,41 @@ class MockLLMProvider(LLMProvider):
             raise ValueError("LLM 返回非法 JSON")
         return {"type": "unknown", "confidence": 0.2}
 
+
+class HttpLLMProvider(LLMProvider):
+    """通过 external_interfaces.yaml 调用 OpenAI 兼容或自定义大模型接口。"""
+
+    def __init__(self, config: LLMEndpointConfig):
+        self.config = config
+
+    async def health_check(self) -> bool:
+        return self.config.enabled and bool(self.config.url)
+
+    async def complete_json(self, prompt: str) -> dict[str, Any]:
+        if not self.config.enabled:
+            raise ProviderError("HTTP LLM 接口未启用，请配置 external_interfaces.yaml 的 llm.enabled")
+        variables = {
+            "prompt": prompt,
+            "api_key": self.config.api_key,
+            "model": self.config.model,
+        }
+        url = render_template(self.config.url, variables)
+        headers = render_template(self.config.headers, variables)
+        body = render_template(self.config.body, variables)
+        try:
+            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+                response = await client.request(self.config.method.upper(), url, headers=headers, json=body)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise ProviderError(f"LLM HTTP 接口调用失败: {exc}") from exc
+
+        content = get_by_path(payload, self.config.content_path, payload)
+        if isinstance(content, dict):
+            return content
+        if not isinstance(content, str):
+            raise ProviderError("LLM 返回内容不是 JSON 对象或 JSON 字符串")
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ProviderError("LLM 返回内容无法解析为 JSON") from exc
